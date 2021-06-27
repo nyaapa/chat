@@ -16,9 +16,8 @@ int main(int argc, char** argv) {
 void run_client(const char* payload) {
 	int sockfd;
 	char buffer[MAX_LINE];
-	char addr[INET6_ADDRSTRLEN];
 	struct sockaddr_in6 sin6;
-	unsigned int len = sizeof(sin6), n;
+	unsigned int len = sizeof(sin6);
 
 	if ((sockfd = socket(PF_INET6, SOCK_DGRAM, 0)) < 0)
 		fatal_error("socket creation failed");
@@ -32,15 +31,27 @@ void run_client(const char* payload) {
 	struct iovec v[] = {{(char*)payload, strlen(payload)}};
 	struct msghdr msg = {&sin6, len, v, sizeof(v) / sizeof(v[0]), NULL, 0, 0};
 
-	sendmsg(sockfd, &msg, MSG_CONFIRM);
+	struct io_uring_l ring;
+	memset(&ring, 0, sizeof(ring));
+	if (setup_io_uring(&ring))
+		exit(EXIT_FAILURE);
 
-	v[0].iov_base = buffer;
-	v[0].iov_len = sizeof(buffer) / sizeof(buffer[0]);
-	n = recvmsg(sockfd, &msg, MSG_WAITALL);
-	buffer[n] = '\0';
-	inet_ntop(sin6.sin6_family, &sin6.sin6_addr, addr, len);
-	printf("Server@[%s] : %s\n", addr, buffer);
+	struct io_uring_entry entry_send = {sockfd, IORING_OP_SENDMSG, IOSQE_IO_HARDLINK, (unsigned long long)&msg, &io_uring_print_sendmsg};
+	io_uring_add(&entry_send, &ring);
 
-	if (close(sockfd))
-		fatal_error("failed to close socket");
+	struct iovec v_recv[] = {{buffer, sizeof(buffer) / sizeof(buffer[0])}};
+	struct msghdr msg_recv = {&sin6, len, v_recv, sizeof(v_recv) / sizeof(v_recv[0]), NULL, 0, 0};
+	struct io_uring_entry entry_recv = {sockfd, IORING_OP_RECVMSG, IOSQE_IO_HARDLINK, (unsigned long long)&msg_recv, &io_uring_print_recvmsg};
+	io_uring_add(&entry_recv, &ring);
+
+	struct io_uring_entry entry_close = {sockfd, IORING_OP_CLOSE, IOSQE_IO_HARDLINK, 0, &io_uring_print_closemsg};
+	io_uring_add(&entry_close, &ring);
+
+	if (io_uring_enter(&ring, 3) != 3)
+		exit(EXIT_FAILURE);
+
+	for (int i = 0; i < 3;) {
+		if (io_uring_entry_and_read(&ring, &i))
+			exit(EXIT_FAILURE);
+	}
 }
