@@ -20,10 +20,8 @@ void run_server(const char* payload) {
 	char addr[INET6_ADDRSTRLEN];
 	unsigned int len = sizeof(sin6), n;
 
-	if ((sockfd = socket(PF_INET6, SOCK_DGRAM, 0)) < 0) {
-		perror("socket creation failed");
-		exit(EXIT_FAILURE);
-	}
+	if ((sockfd = socket(PF_INET6, SOCK_DGRAM, 0)) < 0)
+		fatal_error("socket creation failed");
 
 	memset(&sin6, 0, len);
 
@@ -31,10 +29,8 @@ void run_server(const char* payload) {
 	sin6.sin6_family = AF_INET6;
 	sin6.sin6_addr = in6addr_any;
 
-	if (bind(sockfd, (const struct sockaddr*)&sin6, len)) {
-		perror("bind failed");
-		exit(EXIT_FAILURE);
-	}
+	if (bind(sockfd, (const struct sockaddr*)&sin6, len))
+		fatal_error("bind failed");
 
 	struct iovec v[] = {{buffer, sizeof(buffer) / sizeof(buffer[0])}};
 	struct msghdr msg = {&sin6, len, v, sizeof(v) / sizeof(v[0]), NULL, 0, 0};
@@ -48,8 +44,6 @@ void run_server(const char* payload) {
 	v[0].iov_len = strlen(payload);
 	sendmsg(sockfd, &msg, MSG_CONFIRM);
 
-	if (close(sockfd)) {
-		perror("failed to close socket");
-		exit(EXIT_FAILURE);
-	}
+	if (close(sockfd))
+		fatal_error("failed to close socket");
 }

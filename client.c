@@ -20,10 +20,8 @@ void run_client(const char* payload) {
 	struct sockaddr_in6 sin6;
 	unsigned int len = sizeof(sin6), n;
 
-	if ((sockfd = socket(PF_INET6, SOCK_DGRAM, 0)) < 0) {
-		perror("socket creation failed");
-		exit(EXIT_FAILURE);
-	}
+	if ((sockfd = socket(PF_INET6, SOCK_DGRAM, 0)) < 0)
+		fatal_error("socket creation failed");
 
 	memset(&sin6, 0, len);
 
@@ -37,15 +35,12 @@ void run_client(const char* payload) {
 	sendmsg(sockfd, &msg, MSG_CONFIRM);
 
 	v[0].iov_base = buffer;
-	;
 	v[0].iov_len = sizeof(buffer) / sizeof(buffer[0]);
 	n = recvmsg(sockfd, &msg, MSG_WAITALL);
 	buffer[n] = '\0';
 	inet_ntop(sin6.sin6_family, &sin6.sin6_addr, addr, len);
 	printf("Server@[%s] : %s\n", addr, buffer);
 
-	if (close(sockfd)) {
-		perror("failed to close socket");
-		exit(EXIT_FAILURE);
-	}
+	if (close(sockfd))
+		fatal_error("failed to close socket");
 }
