@@ -1,0 +1,9 @@
+﻿---
+BasedOnStyle: Chromium
+AlignAfterOpenBracket: AlwaysBreak
+ColumnLimit: 160
+TabWidth: 2
+IndentWidth: 2
+UseTab: ForIndentation
+# wait for https://reviews.llvm.org/D33029
+...
