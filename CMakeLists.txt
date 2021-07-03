@@ -8,11 +8,13 @@ string(APPEND CMAKE_C_FLAGS "-D_GNU_SOURCE")
 
 add_executable(server server.c)
 add_executable(server_load server_load.c)
+add_executable(server_load_liburing server_load_liburing.c)
 add_executable(client client.c)
 add_executable(client_load client_load.c)
 add_executable(client_load_no_uring client_load_no_uring.c)
 add_executable(client_load_liburing client_load_liburing.c)
 
+target_link_libraries(server_load_liburing "/usr/lib/liburing.so")
 target_link_libraries(client_load_liburing "/usr/lib/liburing.so")
 
 file(GLOB ALL_SOURCE_FILES *.c *.h)

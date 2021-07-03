@@ -1,7 +1,7 @@
 #include <liburing.h>
 #include "common.h"
 
-void run_client_load_liburing(const char*, int);
+void run_server_load_liburing(const char*, int);
 
 int main(int argc, char** argv) {
 	const char* payload;
@@ -14,13 +14,13 @@ int main(int argc, char** argv) {
 	if (argc < 2)
 		fatal_error("Please pass it count");
 
-	run_client_load_liburing(payload, atoi(argv[1]));
+	run_server_load_liburing(payload, atoi(argv[1]));
 }
 
-void run_client_load_liburing(const char* payload, int repeat) {
+void run_server_load_liburing(const char* payload, int repeat) {
 	int sockfd;
-	char buffer[MAX_LINE];
 	struct sockaddr_in6 sin6;
+	char buffer[MAX_LINE];
 	unsigned int len = sizeof(sin6);
 
 	if ((sockfd = socket(PF_INET6, SOCK_DGRAM, 0)) < 0)
@@ -32,8 +32,8 @@ void run_client_load_liburing(const char* payload, int repeat) {
 	sin6.sin6_family = AF_INET6;
 	sin6.sin6_addr = in6addr_any;
 
-	struct iovec v[] = {{(char*)payload, strlen(payload)}};
-	struct msghdr msg = {&sin6, len, v, sizeof(v) / sizeof(v[0]), NULL, 0, 0};
+	if (bind(sockfd, (const struct sockaddr*)&sin6, len))
+		fatal_error("bind failed");
 
 	struct io_uring ring;
 	if (io_uring_queue_init(URING_ENTRIES, &ring, 0) < 0)
@@ -41,9 +41,11 @@ void run_client_load_liburing(const char* payload, int repeat) {
 
 	struct io_uring_sqe* sqe = io_uring_get_sqe(&ring);
 
-	struct io_uring_entry entry_send = {sockfd, IORING_OP_SENDMSG, IOSQE_IO_LINK, (unsigned long long)&msg, &io_uring_print_sendmsg};
-	io_uring_prep_sendmsg(sqe, sockfd, &msg, 0);
-	io_uring_sqe_set_data(sqe, &entry_send);
+	struct iovec v_recv[] = {{buffer, sizeof(buffer) / sizeof(buffer[0])}};
+	struct msghdr msg_recv = {&sin6, len, v_recv, sizeof(v_recv) / sizeof(v_recv[0]), NULL, 0, 0};
+	struct io_uring_entry entry_recv = {sockfd, IORING_OP_RECVMSG, 0, (unsigned long long)&msg_recv, &io_uring_print_recvmsg};
+	io_uring_prep_recvmsg(sqe, sockfd, &msg_recv, 0);
+	io_uring_sqe_set_data(sqe, &entry_recv);
 
 	if (io_uring_submit(&ring) < 0)
 		fatal_error("io_uring_submit failed");
@@ -60,13 +62,13 @@ void run_client_load_liburing(const char* payload, int repeat) {
 
 	while (--repeat >= 0) {
 		// yeah, overrides
-		struct iovec v_recv[] = {{buffer, sizeof(buffer) / sizeof(buffer[0])}};
-		struct msghdr msg_recv = {&sin6, len, v_recv, sizeof(v_recv) / sizeof(v_recv[0]), NULL, 0, 0};
-		struct io_uring_entry entry_recv = {sockfd, IORING_OP_RECVMSG, 0, (unsigned long long)&msg_recv, &io_uring_nop};
+		struct iovec v_send[] = {{(char*)payload, strlen(payload)}};
+		struct msghdr msg_send = {&sin6, len, v_send, sizeof(v_send) / sizeof(v_send[0]), NULL, 0, 0};
+		struct io_uring_entry entry_send = {sockfd, IORING_OP_SENDMSG, 0, (unsigned long long)&msg_send, &io_uring_nop};
 		for (int i = 0; i < BATCH_SIZE; ++i) {
 			sqe = io_uring_get_sqe(&ring);
-			io_uring_prep_recvmsg(sqe, sockfd, &msg_recv, 0);
-			io_uring_sqe_set_data(sqe, &entry_recv);
+			io_uring_prep_sendmsg(sqe, sockfd, &msg_send, 0);
+			io_uring_sqe_set_data(sqe, &entry_send);
 		}
 
 		int submitted = io_uring_submit(&ring);
@@ -96,7 +98,7 @@ void run_client_load_liburing(const char* payload, int repeat) {
 		}
 	}
 
-	struct io_uring_entry entry_close = {sockfd, IORING_OP_CLOSE, IOSQE_IO_LINK, 0, &io_uring_print_closemsg};
+	struct io_uring_entry entry_close = {sockfd, IORING_OP_CLOSE, 0, 0, &io_uring_print_closemsg};
 	sqe = io_uring_get_sqe(&ring);
 	io_uring_prep_close(sqe, sockfd);
 	io_uring_sqe_set_data(sqe, &entry_close);
