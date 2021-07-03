@@ -39,6 +39,9 @@ void run_server_load_liburing(const char* payload, int repeat) {
 	if (io_uring_queue_init(URING_ENTRIES, &ring, 0) < 0)
 		fatal_error("io_uring_queue_init failed");
 
+	if (io_uring_register_files(&ring, &sockfd, 1) < 0)
+		fatal_error("io_uring_register_files failed");
+
 	struct io_uring_sqe* sqe = io_uring_get_sqe(&ring);
 
 	struct iovec v_recv[] = {{buffer, sizeof(buffer) / sizeof(buffer[0])}};
@@ -60,42 +63,45 @@ void run_server_load_liburing(const char* payload, int repeat) {
 
 	io_uring_cqe_seen(&ring, cqe);
 
+	// yeah, overrides
+	struct iovec v_send[] = {{(char*)payload, strlen(payload)}};
+	struct msghdr msg_send = {&sin6, len, v_send, sizeof(v_send) / sizeof(v_send[0]), NULL, 0, 0};
+	struct io_uring_entry entry_send = {sockfd, IORING_OP_SENDMSG, 0, (unsigned long long)&msg_send, &io_uring_nop};
 	while (--repeat >= 0) {
-		// yeah, overrides
-		struct iovec v_send[] = {{(char*)payload, strlen(payload)}};
-		struct msghdr msg_send = {&sin6, len, v_send, sizeof(v_send) / sizeof(v_send[0]), NULL, 0, 0};
-		struct io_uring_entry entry_send = {sockfd, IORING_OP_SENDMSG, 0, (unsigned long long)&msg_send, &io_uring_nop};
 		for (int i = 0; i < BATCH_SIZE; ++i) {
 			sqe = io_uring_get_sqe(&ring);
-			io_uring_prep_sendmsg(sqe, sockfd, &msg_send, 0);
+			io_uring_prep_sendmsg(sqe, 0, &msg_send, 0);
+			sqe->flags |= IOSQE_FIXED_FILE;
 			io_uring_sqe_set_data(sqe, &entry_send);
 		}
 
-		int submitted = io_uring_submit(&ring);
+		int submitted = io_uring_submit_and_wait(&ring, BATCH_SIZE);
 		if (submitted != BATCH_SIZE) {
 			printf("Submitted just %i/%i\n", submitted, BATCH_SIZE);
 		}
 
-		struct io_uring_cqe* cqes[BATCH_SIZE];
-		for (int read = 0; read < BATCH_SIZE;) {
-			int completions = io_uring_peek_batch_cqe(&ring, cqes, BATCH_SIZE - read);
-			if (completions == 0) {
-				continue;
-			}
+		io_uring_cq_advance(&ring, BATCH_SIZE);
 
-			for (int j = 0; j < completions; j++) {
-				if (cqes[j]->res < 0) {
-					printf("Async task failed: %s\n", strerror(-cqes[j]->res));
-				} else {
-					struct io_uring_entry* entry = (struct io_uring_entry*)io_uring_cqe_get_data(cqes[j]);
-					entry->handler(entry);
-				}
+		// struct io_uring_cqe* cqes[BATCH_SIZE];
+		// for (int read = 0; read < BATCH_SIZE;) {
+		// 	int completions = io_uring_peek_batch_cqe(&ring, cqes, BATCH_SIZE - read);
+		// 	if (completions == 0) {
+		// 		continue;
+		// 	}
 
-				io_uring_cqe_seen(&ring, cqes[j]);
-			}
+		// 	for (int j = 0; j < completions; j++) {
+		// 		// if (cqes[j]->res < 0) {
+		// 		// 	printf("Async task failed: %s\n", strerror(-cqes[j]->res));
+		// 		// } else {
+		// 		// 	struct io_uring_entry* entry = (struct io_uring_entry*)io_uring_cqe_get_data(cqes[j]);
+		// 		// 	entry->handler(entry);
+		// 		// }
 
-			read += completions;
-		}
+		// 		io_uring_cqe_seen(&ring, cqes[j]);
+		// 	}
+
+		// 	read += completions;
+		// }
 	}
 
 	struct io_uring_entry entry_close = {sockfd, IORING_OP_CLOSE, 0, 0, &io_uring_print_closemsg};
